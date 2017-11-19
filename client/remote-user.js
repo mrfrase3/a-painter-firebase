@@ -1,3 +1,5 @@
+const remote_head = require('./remote_head.json');
+
 
 AFRAME.registerComponent('remote-controls', {
 
@@ -34,7 +36,7 @@ AFRAME.registerComponent('remote-headset', {
     console.log(this.data);
     var el = this.el;
     var self = this;
-    el.setAttribute('json-model', {src: 'client/remote_head.json'});
+    el.setAttribute('json-model', {src: 'data:application/json,' + JSON.stringify(remote_head)});
 
     el.addEventListener('model-loaded', function (evt) {
       el.object3DMap.mesh.children[0].material.color = new THREE.Color(self.data.color);

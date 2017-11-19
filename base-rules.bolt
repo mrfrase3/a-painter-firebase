@@ -1,0 +1,217 @@
+
+//
+// Users
+//
+
+path /users {
+  read(){isNotAnon()}
+}
+
+path /users/{uid} {
+  write(){isNotAnon() && isCurrentUser(uid)}
+  validate(){initial(uid, auth.uid) && isCurrentUser(uid)}
+}
+
+path /users/{uid}/username is NameString{
+  validate(){prior(root).usernames[this] === auth.uid}
+}
+
+// true if the user added the room. used to split out the "shared with me" rooms.
+path /users/{uid}/rooms/{rid} is Boolean{
+  write(){isNotAnon() && (isCurrentUser(uid) || isRoomOwner(auth.uid, rid))}
+  validate(){isRoom(rid) && canRead(uid, rid) && (isCurrentUser(uid) || (isRoomOwner(auth.uid, rid) && this == false))}
+}
+
+path /usernames {
+  read(){isNotAnon()}
+}
+path /usernames/{username} is String{
+  write(){isNotAnon() && isCurrentUser(this)}
+  validate(){prior(root).usernames[username] === null && username.length > 4 && username.length < 64 && isCurrentUser(this)}
+}
+
+//
+// Rooms
+//
+
+path /rooms/{rid} is Room{
+  create(){isUser(auth.uid) && isNotAnon() && this.collaborators[auth.uid] === 3}
+  update(){isRoomOwner(auth.uid, rid)}
+  delete(){isRoomOwner(auth.uid, rid)}
+  read(){isSignedIn() && canRead(auth.uid, rid)}
+}
+
+path /rooms/{rid}/collaborators/{uid} is UserPerm{
+  // Either an owner is writing for someone else or someone else is writing for themself
+  write(){
+    return isRoomOwner(auth.uid, rid) ||
+      (
+        uid === auth.uid &&
+        (
+          (this === 1 && canRead(auth.uid, rid)) ||
+          (this === 2 && canWrite(auth.uid, rid))
+        )
+      )
+  }
+  validate(){isUser(uid)}
+}
+
+type Room {
+  createdOn: Number,
+  name: NameString,
+  public: PublicPerm
+}
+
+type PublicPerm extends Number {
+  validate(){this >= 0 && this <= 2}
+}
+
+type UserPerm extends Number {
+  validate(){
+    return this >= 0 &&
+    this <= 3;
+  }
+}
+
+//
+// Paintings
+//
+
+path /paintings/{rid} is Painting{
+  write(){isRoom(rid) && isRoomOwner(auth.uid, rid)}
+  read(){isSignedIn() && canRead(auth.uid, rid)}
+}
+
+path /paintings/{rid}/strokes/{sid} is Stroke{
+  write(){
+    return isSignedIn() &&
+    canWrite(auth.uid, rid) &&
+    this.brush.owner === auth.uid
+  }
+  validate(){sid === this.brush.owner + "-" + this.brush.timestamp}
+}
+
+path /paintings/{rid}/users/{uid} is UserControls{
+  write(){
+    return isSignedIn() &&
+    canWrite(auth.uid, rid) &&
+    uid === auth.uid
+  }
+}
+
+type Painting {
+  version: Number,
+  validate(){isRoom(key())}
+}
+
+type Stroke {
+  points: Point[],
+  brush: BrushData,
+}
+
+type UserControls {
+  lhand: Control,
+  rhand: Control,
+  head: Control
+}
+
+type Control {
+  pos: Vecxyz,
+  rot: Vecxyz
+}
+
+type BrushData {
+  owner: StrokeUserID,
+  timestamp: Timestamp,
+  color: Vec3,
+  brushName: String,
+  size: Number
+}
+
+type Point {
+  position: Vec3,
+  orientation: Vec4,
+  pointerPosition: Vec3,
+  pressure: Number,
+  timestamp: Number
+}
+
+type StrokeUserID extends String {
+  validate(){initial(this, this) && isUser(this)}
+}
+
+//
+// Universal Types
+//
+
+type NameString extends String {
+  validate() { this.length > 4 && this.length < 64 }
+}
+
+type Timestamp extends Number {
+  validate() {this > 0 && this <= now}
+}
+
+type Vec3 {
+  '0': Number,
+  '1': Number,
+  '2': Number
+}
+
+type Vec4 {
+  '0': Number,
+  '1': Number,
+  '2': Number,
+  '3': Number
+}
+
+type Vecxyz {
+  'x': Number,
+  'y': Number,
+  'z': Number
+}
+
+//
+// Helper Functions
+//
+
+isUser(uid){prior(root).users[uid] !== null}
+
+isRoom(rid){prior(root).rooms[rid] !== null}
+
+isPublic(rid){prior(root).rooms[rid].public > 0}
+
+isPublicRead(rid){prior(root).rooms[rid].public >= 1}
+
+isPublicWrite(rid){prior(root).rooms[rid].public >= 2}
+
+isRoomOwner(uid, rid){
+  return prior(root).rooms[rid].collaborators[uid].isNumber() &&
+  prior(root).rooms[rid].collaborators[uid] >= 3;
+}
+
+canRead(uid, rid){
+  return isPublicRead(rid) ||
+    (
+      prior(root).rooms[rid].collaborators[uid] !== null &&
+      prior(root).rooms[rid].collaborators[uid] >= 1
+    );
+}
+
+canWrite(uid, rid){
+  return isPublicWrite(rid) ||
+    (
+      prior(root).rooms[rid].collaborators[uid] !== null &&
+      prior(root).rooms[rid].collaborators[uid] >= 2
+    );
+}
+
+isNotAnon(){isSignedIn() && auth.provider !== 'anonymous'}
+
+isCurrentUser(uid) { isSignedIn() && auth.uid === uid }
+
+isSignedIn() { auth.uid !== null }
+
+createOnly(value) { prior(value) == null && value !== null }
+
+initial(value, init) { value === (prior(value) === null ? init : prior(value)) }
